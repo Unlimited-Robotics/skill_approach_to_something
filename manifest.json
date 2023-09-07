@@ -1,0 +1,19 @@
+{
+    "name": "approach_to_something",
+    "description": "",
+    "type": "skill",
+    "version" : "0.6.0",
+    "dependencies" : {
+        "pip": [],
+        "skills": []
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/unlimitedrobotics-skills/approach_to_tags"
+    },
+    "license": "MIT",
+    "author": {
+        "name": "Bryan Betancur",
+        "email": "bryan@unlimited-robotics.com"
+    }
+}
