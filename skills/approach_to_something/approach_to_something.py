@@ -820,7 +820,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 await self.step_task
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -854,7 +854,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -870,7 +870,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -889,7 +889,7 @@ class SkillApproachToSomething(RayaFSMSkill):
             try:
                 await self.step_task
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -934,7 +934,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -950,7 +950,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -971,7 +971,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
@@ -996,7 +996,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries += 1 
+                self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
