@@ -881,7 +881,7 @@ class SkillApproachToSomething(RayaFSMSkill):
             if is_motion_ok and self.is_there_detection:
                 self.set_state('READ_TARGET')
             else:
-                await self.enter_ROTATE_UNTIL_DETECTIONS()
+                await self.enter_ROTATE_UNTIL_PREDICTIONS()
                 
 
     async def transition_from_STEP_N(self):
