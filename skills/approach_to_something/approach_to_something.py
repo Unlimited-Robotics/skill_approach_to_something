@@ -29,7 +29,7 @@ class SkillApproachToSomething(RayaFSMSkill):
     ### SKILL ###
 
     REQUIRED_SETUP_ARGS = [
-            'working_camera'
+            'working_camera',
             'predictor'
         ]
 
