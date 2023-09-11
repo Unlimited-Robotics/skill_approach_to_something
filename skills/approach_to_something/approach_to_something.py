@@ -57,7 +57,8 @@ class SkillApproachToSomething(RayaFSMSkill):
             'tracking_threshold': 0.3,
             'position_state_threshold': 0.5,
             'max_allowed_distance':3.0,
-            'allowed_motion_tries': 10 
+            'allowed_motion_tries': 10 ,
+            'allow_previous_predictions': True
         }
 
     ### FSM ###
@@ -89,12 +90,12 @@ class SkillApproachToSomething(RayaFSMSkill):
     STATES_TIMEOUTS = {
             'READ_TARGET' :      
                     (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-            # 'READ_TARGET_N' :   
-            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-            # 'READ_TARGET_FINAL_CORRECTION': 
-            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-            # 'READ_TARGET_FINAL': 
-            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            'READ_TARGET_N' :   
+                    (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            'READ_TARGET_FINAL_CORRECTION': 
+                    (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            'READ_TARGET_FINAL': 
+                    (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
     }
 
     ### SKILL METHODS ###
@@ -153,7 +154,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         #calculations
         self.detections_cameras = set()
         self.correct_detection = None
-        self.angle_intersection_goal = None
+        self.angle_robot_intersection = None
         self.angle_robot_intersection = None
         self.angular_sign = None
         self.angle_robot_goal = None
@@ -284,9 +285,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.correct_detection[1], 
                 self.target_angle
             ]
-        self.log.warn(
-                f'self.initial_pos: {self.p_prediction}'
-            )
+        # self.log.warn(
+        #         f'self.initial_pos: {self.p_prediction}'
+        #     )
         int_info, self.angle_robot_intersection, \
         self.distance_to_inter, self.distance = await self.get_intersection_info(self.p_prediction)     
         self.intersection, self.before = int_info
@@ -436,6 +437,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 not self.wait_until_complete_queue):
             correct_detection = self.__process_multiple_detections(predicts)
             if correct_detection:
+                self.previous_goal = correct_detection
                 self.correct_detection = correct_detection
                 self.is_there_detection = True
                 self.waiting_detection = False
@@ -488,8 +490,6 @@ class SkillApproachToSomething(RayaFSMSkill):
                     )
             frames_procesed += 1
             goal = possible_goals[0][0]
-        if goal:
-            self.previous_goal = goal
         return goal
 
 
@@ -524,9 +524,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.correct_detection[1], 
                 self.target_angle
             ]
-        self.log.warn(
-                f'self.initial_pos: {self.p_prediction}'
-            )
+        # self.log.warn(
+        #         f'self.initial_pos: {self.p_prediction}'
+        #     )
         int_info, self.angle_robot_intersection, \
         self.distance_to_inter, self.distance = await self.get_intersection_info(self.p_prediction)     
         self.intersection, self.before = int_info
@@ -707,7 +707,7 @@ class SkillApproachToSomething(RayaFSMSkill):
     async def enter_ROTATE_UNTIL_PREDICTIONS(self):
         self.start_detections(wait_complete_queue=False)
         ang_vel=(self.execute_args['angular_velocity'] *
-                 np.sign(self.angle_intersection_goal))
+                 np.sign(self.angle_robot_intersection))
         await self.motion.set_velocity(x_velocity=0.0,
                                        y_velocity=0.0,
                                        angular_velocity=ang_vel,
@@ -725,9 +725,9 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_ROTATE_TO_TARGET_N(self):
-        await self.send_feedback({'rotation':self.angle_intersection_goal})
+        await self.send_feedback({'rotation':self.angle_robot_intersection})
         await self.motion.rotate(
-                angle=self.angle_intersection_goal, 
+                angle=self.angle_robot_intersection, 
                 angular_speed=self.execute_args['angular_velocity'], 
                 wait=False
             )
@@ -736,7 +736,7 @@ class SkillApproachToSomething(RayaFSMSkill):
     async def enter_ROTATE_UNTIL_PREDICTIONS_N(self):
         self.start_detections(wait_complete_queue=False)
         ang_vel=(self.execute_args['angular_velocity'] *
-                 np.sign(self.angle_intersection_goal))
+                 np.sign(self.angle_robot_intersection))
         await self.motion.set_velocity(x_velocity=0.0,
                                        y_velocity=0.0,
                                        angular_velocity=ang_vel,
@@ -802,6 +802,10 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def transition_from_READ_TARGET(self):
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
         if self.is_there_detection:
             if await self.check_initial_position():
                 self.set_state('CENTER_TO_TARGET')
@@ -826,9 +830,16 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def transition_from_READ_TARGET_2(self):
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
         if (time.time()-self.timer1) > NO_TARGET_TIMEOUT_SHORT or \
                 self.is_there_detection:
             self.stop_detections()
+            if not self.is_there_detection and self.execute_args['allow_previous_predictions']:
+                self.is_there_detection = True
+                self.correct_detection = self.previous_goal
             if self.is_there_detection:
                 self.set_state('READ_TARGET_N')
             else:
@@ -860,7 +871,10 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries+=1 
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
-                
+            if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                    and self.previous_goal:   
+                self.is_there_detection = True
+                self.correct_detection = self.previous_goal
             if is_motion_ok and self.is_there_detection:
                 self.set_state('READ_TARGET')
             else:
@@ -881,7 +895,11 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def transition_from_READ_TARGET_N(self):
-        if self.is_there_detection or self.previous_goal:
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
+        if self.is_there_detection:
             if self.is_final_step:
                 self.set_state('CENTER_TO_TARGET')
             else:
@@ -889,9 +907,16 @@ class SkillApproachToSomething(RayaFSMSkill):
                 
 
     async def transition_from_READ_TARGET_N_2(self):
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
         if (time.time()-self.timer1) > NO_TARGET_TIMEOUT_SHORT or \
                 self.is_there_detection:
             self.stop_detections()
+            if not self.is_there_detection and self.execute_args['allow_previous_predictions']:
+                self.is_there_detection = True
+                self.correct_detection = self.previous_goal
             if self.is_there_detection:
                 self.set_state('READ_TARGET_N')
             else:
@@ -923,7 +948,10 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries+=1 
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
-                
+            if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                    and self.previous_goal:
+                self.is_there_detection = True
+                self.correct_detection = self.previous_goal             
             if is_motion_ok and self.is_there_detection:
                 self.set_state('READ_TARGET_N')
             else:
@@ -946,6 +974,10 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def transition_from_READ_TARGET_FINAL_CORRECTION(self):
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
         if self.is_there_detection:
             self.set_state('MOVE_LINEAR_FINAL')
 
@@ -966,10 +998,11 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def transition_from_READ_TARGET_FINAL(self):
-        if self.is_there_detection or self.previous_goal: 
-            self.set_state('MOVE_LINEAR_FINAL')
-
-        if self.is_there_detection or self.previous_goal:
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal  
+        if self.is_there_detection:
             await self.planning_calculations()
             self.main_result = {
                     "final_error_x": self.projected_error_x,
