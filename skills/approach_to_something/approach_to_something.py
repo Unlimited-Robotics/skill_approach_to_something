@@ -820,7 +820,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 await self.step_task
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.set_state('ROTATE_UNTIL_PREDICTIONS')
@@ -853,7 +854,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.set_state('ROTATE_UNTIL_PREDICTIONS')
@@ -868,7 +870,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
             if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
@@ -886,7 +889,8 @@ class SkillApproachToSomething(RayaFSMSkill):
             try:
                 await self.step_task
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.is_final_step = False
@@ -930,7 +934,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.set_state('ROTATE_UNTIL_PREDICTIONS_N')
@@ -945,7 +950,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
             if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
@@ -965,7 +971,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.set_state('READ_TARGET_N')
@@ -989,7 +996,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.motion.check_last_motion_exception()
                 is_motion_ok = True
             except RayaMotionObstacleDetected as e:
-                self.tries+=1 
+                self.tries += 1 
+                await self.send_feedback("Motion Failed by obstacle")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
                     raise e
                 self.set_state('READ_TARGET_FINAL_CORRECTION')
