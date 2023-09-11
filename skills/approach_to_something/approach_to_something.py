@@ -159,7 +159,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         self.angular_sign = None
         self.angle_robot_goal = None
         self.linear_distance = None
-
+        self.tries = 0
         self.__predictions_queue= queue.Queue()
 
         self.additional_distance= self.execute_args['min_correction_distance']
