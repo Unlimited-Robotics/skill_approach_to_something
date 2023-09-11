@@ -15,60 +15,30 @@ import time
 from raya.enumerations import POSITION_UNIT, ANGLE_UNIT
 import tf_transformations as tftr
 from transforms3d import euler
-
+from raya.exceptions import RayaMotionObstacleDetected
 from raya.controllers import MotionController
 from raya.controllers import CVController, NavigationController
 from raya.skills import RayaFSMSkill
 
 from .constants import *
-import threading
 
 
 
 class SkillApproachToSomething(RayaFSMSkill):
 
-    ### FSM ###
-
-    STATES = [
-            'READ_TARGET',
-            'GO_TO_INTERSECTION',
-            'READ_TARGET_2',
-            'ROTATE_TO_TARGET',
-            'STEP_N',
-            'READ_TARGET_N',
-            'CENTER_TO_TARGET',
-            'READ_TARGET_FINAL',
-            'MOVE_LINEAR_FINAL',
-            'END'
-        ]
-
-    INITIAL_STATE = 'READ_TARGET'
-
-    END_STATES = [
-        'END',
-    ]
-
-    STATES_TIMEOUTS = {
-        'READ_TARGET' : (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-        # 'READ_TARGET_N' : (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-        # 'READ_TARGET_FINAL' : (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
-    }
-
-
     ### SKILL ###
 
     REQUIRED_SETUP_ARGS = [
             'working_camera'
+            'predictor'
         ]
 
     DEFAULT_SETUP_ARGS = {
-            'log_transitions':True,
+            'fsm_log_transitions':True,
             'identifier': '',
         }
 
-    REQUIRED_EXECUTE_ARGS = [
-            'predictor'
-        ]
+    REQUIRED_EXECUTE_ARGS = []
 
     DEFAULT_EXECUTE_ARGS = {
             'distance_to_goal': 1.0,
@@ -86,7 +56,46 @@ class SkillApproachToSomething(RayaFSMSkill):
             'predictions_timeout': 0,
             'tracking_threshold': 0.3,
             'position_state_threshold': 0.5,
+            'max_allowed_distance':3.0,
+            'allowed_motion_tries': 10 
         }
+
+    ### FSM ###
+
+    STATES = [
+            'READ_TARGET',
+            'GO_TO_INTERSECTION',
+            'READ_TARGET_2',
+            'ROTATE_TO_TARGET',
+            'ROTATE_UNTIL_PREDICTIONS',
+            'STEP_N',
+            'READ_TARGET_N',
+            'READ_TARGET_N_2',
+            'ROTATE_TO_TARGET_N',
+            'ROTATE_UNTIL_PREDICTIONS_N',
+            'CENTER_TO_TARGET',
+            'READ_TARGET_FINAL_CORRECTION',
+            'MOVE_LINEAR_FINAL',
+            'READ_TARGET_FINAL',
+            'END'
+        ]
+
+    INITIAL_STATE = 'READ_TARGET'
+
+    END_STATES = [
+        'END',
+    ]
+
+    STATES_TIMEOUTS = {
+            'READ_TARGET' :      
+                    (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            # 'READ_TARGET_N' :   
+            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            # 'READ_TARGET_FINAL_CORRECTION': 
+            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            # 'READ_TARGET_FINAL': 
+            #         (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+    }
 
     ### SKILL METHODS ###
 
@@ -100,10 +109,9 @@ class SkillApproachToSomething(RayaFSMSkill):
 
         self.cv:CVController = await self.get_controller('cv')
 
-        self.mutex_cb_detections= threading.Lock()
         # TODO: Definir los params dependiendo del modelo
         self.predictor_handler = await self.cv.enable_model(
-                name=self.execute_args['predictor'], 
+                name=self.setup_args['predictor'], 
                 source=self.setup_args['working_camera'],
                 model_params = {'depth':True}
             )
@@ -143,6 +151,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         self.is_final_step = False
 
         #calculations
+        self.detections_cameras = set()
         self.correct_detection = None
         self.angle_intersection_goal = None
         self.angle_robot_intersection = None
@@ -174,25 +183,21 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def rotate_and_move_linear(self):
-        direction = 'left' if np.sign(self.angle_robot_intersection) > 0 else 'right'
-        self.log.debug(
-                f'Rotating {direction} {self.angle_robot_intersection}'
-            )
-        try:
-            if abs(self.projected_error_y) > self.execute_args['max_y_error_allowed']:
-                self.log.debug(f'rotating because projected error exceed limit {self.projected_error_y}')
-                await self.motion.rotate(
-                        angle=abs(self.angle_robot_intersection), 
-                        angular_speed=self.execute_args['angular_velocity'] * np.sign(self.angle_robot_intersection), 
-                        wait=True
-                    )
-            await self.motion.move_linear(
-                    distance=self.linear_distance, 
-                    x_velocity=self.execute_args['linear_velocity'], 
+        await self.send_feedback({
+                'rotation': self.angle_robot_intersection,
+                'linear': self.linear_distance
+            })
+        if abs(self.projected_error_y) > self.execute_args['max_y_error_allowed']:
+            await self.motion.rotate(
+                    angle=self.angle_robot_intersection, 
+                    angular_speed=self.execute_args['angular_velocity'], 
                     wait=True
                 )
-        except Exception as e:
-            self.task_exception = e
+        await self.motion.move_linear(
+                distance=self.linear_distance, 
+                x_velocity=self.execute_args['linear_velocity'], 
+                wait=True
+            )
     
 
     def start_detections(self, wait_complete_queue=True):
@@ -247,8 +252,13 @@ class SkillApproachToSomething(RayaFSMSkill):
                 robot_position[:2], 
                 goal
             )
+        await self.send_feedback({
+                'initial_euclidean_distance': ini_target_distance,
+                'initial_error_x' : distance_x,
+                'initial_error_y' : distance_y
+            })
         if ini_target_distance < (self.execute_args['distance_to_goal'] + 
-                                  self.execute_args['min_correction_distance']):
+                                  self.additional_distance):
             self.abort(
                     ERROR_TOO_CLOSE_TO_TARGET,
                     f'Robot is too close to the target. It is '
@@ -256,7 +266,15 @@ class SkillApproachToSomething(RayaFSMSkill):
                     f'distance to goal ({self.execute_args["distance_to_goal"]:.2f}) '
                     f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})'
                 )
-
+        if ini_target_distance > self.execute_args['max_allowed_distance']:
+            self.abort(
+                    ERROR_TOO_FAR_TO_TARGET,
+                    f'Robot is too far to the target. It is '
+                    f'{ini_target_distance:.2f}, and it must be less than '
+                    f'max_allowed_distance '
+                    f'{self.execute_args["max_allowed_distance"]}'
+                )
+            
 
     async def planning_calculations(self):
         if not self.correct_detection:
@@ -285,6 +303,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 robot_position[:2], 
                 self.target_angle
             )
+        await self.send_feedback({'proyected_y_error': self.projected_error_y})
         self.projected_error_x = abs(distance_x) - self.execute_args['distance_to_goal']
         self.log.debug(
                 f'distance to final point {distance_x} {self.projected_error_y}'
@@ -388,15 +407,17 @@ class SkillApproachToSomething(RayaFSMSkill):
     
     
     def _callback_predictions(self, predictions, timestamp):
-        if predictions:
-            __predictions = predictions
-            __predictions['timestamp'] = timestamp[0]+timestamp[1]/1e9
-            if self.waiting_detection:
+        try:
+            if predictions and self.waiting_detection:
                 self.__predictions_queue.put(predictions)
                 if self.__predictions_queue._qsize() == \
                         self.execute_args['predictions_to_average'] or \
                         not self.wait_until_complete_queue:                
                     self.__update_predictions()
+        except Exception as e:
+            self.abort(254, f'Exception in callback: [{type(e)}]: {e}')
+            import traceback
+            traceback.print_exc()
                 
 
     def __update_predictions(self):
@@ -412,7 +433,7 @@ class SkillApproachToSomething(RayaFSMSkill):
             predicts.append(goal)
 
         if (len(predicts) == self.execute_args['predictions_to_average'] or 
-            not self.wait_until_complete_queue):
+                not self.wait_until_complete_queue):
             correct_detection = self.__process_multiple_detections(predicts)
             if correct_detection:
                 self.correct_detection = correct_detection
@@ -420,7 +441,8 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.waiting_detection = False
                 return
             else:
-                temporal_queue.get() # discarding last value 
+                if not temporal_queue.empty():
+                    temporal_queue.get() # discarding last value 
 
         while not temporal_queue.empty():
             self.__predictions_queue.put(temporal_queue.get())
@@ -675,41 +697,83 @@ class SkillApproachToSomething(RayaFSMSkill):
                 f'Rotating {direction} {abs(angle_to_rotate)}'
             )
         await self.motion.rotate(
-                angle=abs(angle_to_rotate), 
-                angular_speed=\
-                    self.execute_args['angular_velocity'] * np.sign(angle_to_rotate), 
+                angle=angle_to_rotate, 
+                angular_speed=self.execute_args['angular_velocity'], 
                 wait=False
             )
         self.command = (0.0, self.execute_args['angular_velocity'] * np.sign(angle_to_rotate)) 
 
+
+    async def enter_ROTATE_UNTIL_PREDICTIONS(self):
+        self.start_detections(wait_complete_queue=False)
+        ang_vel=(self.execute_args['angular_velocity'] *
+                 np.sign(self.angle_intersection_goal))
+        await self.motion.set_velocity(x_velocity=0.0,
+                                       y_velocity=0.0,
+                                       angular_velocity=ang_vel,
+                                       duration=0.2,
+                                       wait=False)
+        
     
     async def enter_READ_TARGET_N(self):
         self.start_detections()
         
 
+    async def enter_READ_TARGET_N_2(self):
+        self.start_detections(wait_complete_queue=False)
+        self.timer1 = time.time()
+
+
+    async def enter_ROTATE_TO_TARGET_N(self):
+        await self.send_feedback({'rotation':self.angle_intersection_goal})
+        await self.motion.rotate(
+                angle=self.angle_intersection_goal, 
+                angular_speed=self.execute_args['angular_velocity'], 
+                wait=False
+            )
+        
+
+    async def enter_ROTATE_UNTIL_PREDICTIONS_N(self):
+        self.start_detections(wait_complete_queue=False)
+        ang_vel=(self.execute_args['angular_velocity'] *
+                 np.sign(self.angle_intersection_goal))
+        await self.motion.set_velocity(x_velocity=0.0,
+                                       y_velocity=0.0,
+                                       angular_velocity=ang_vel,
+                                       duration=0.2,
+                                       wait=False)
+        
+
     async def enter_STEP_N(self):
-        # self.additional_distance = 0.0
+        self.additional_distance = 0.0
         await self.planning_calculations()
         self.linear_distance = self.execute_args['step_size']
         if self.projected_error_x<=self.execute_args['step_size']:
             self.is_final_step=True
             self.linear_distance=self.projected_error_x
-        self.log.debug(f"distance: {self.projected_error_x} ")
+        await self.send_feedback({
+                'distance_to_target': self.projected_error_x,
+            })
         self.step_task = asyncio.create_task(self.rotate_and_move_linear())
 
 
     async def enter_CENTER_TO_TARGET(self):
         await self.planning_calculations()
+        await self.send_feedback({
+                'final_rotation': self.angle_robot_goal,
+            })
         if abs(self.angle_robot_goal) > \
             self.execute_args['max_angle_error_allowed']:
-            ang_vel=(self.execute_args['angular_velocity'] *
-                    np.sign(self.angle_robot_goal))
             await self.motion.rotate(
-                    angle=abs(self.angle_robot_goal), 
-                    angular_speed=ang_vel, 
+                    angle=self.angle_robot_goal, 
+                    angular_speed=self.execute_args['angular_velocity'], 
                     wait=False
                 )
     
+    async def enter_READ_TARGET_FINAL_CORRECTION(self):
+        self.start_detections()
+        self.timer1 = time.time()
+
 
     async def enter_READ_TARGET_FINAL(self):
         self.start_detections()
@@ -718,14 +782,20 @@ class SkillApproachToSomething(RayaFSMSkill):
     async def enter_MOVE_LINEAR_FINAL(self):
         await self.planning_calculations()
         linear_distance = self.projected_error_x
-        self.log.debug(f"linear distance to correct {linear_distance}"
-                           f" error y {self.projected_error_y}")
+        await self.send_feedback({
+                "final_linear": linear_distance,
+            })
         if abs(linear_distance) > self.execute_args['max_x_error_allowed']:
-            await self.motion.move_linear(distance=abs(linear_distance), 
-                                            x_velocity=(
-            self.execute_args['linear_velocity']*np.sign(linear_distance)), 
-                                            wait=False)
+            await self.motion.move_linear(
+                    distance=linear_distance, 
+                    x_velocity=self.execute_args['linear_velocity'], 
+                    wait=False
+                )
 
+
+    async def enter_READ_TARGET_FINAL(self):
+        self.start_detections()
+        self.timer1 = time.time()
 
 
     ### TRANSITIONS ###
@@ -741,14 +811,23 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     async def transition_from_GO_TO_INTERSECTION(self):
         if self.step_task.done():
-            await self.step_task
-            if self.task_exception is not None:
-                raise self.task_exception            
-            self.set_state('READ_TARGET_2')
+            is_motion_ok = False
+            try:
+                await self.step_task
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.set_state('ROTATE_UNTIL_PREDICTIONS')
+
+            if is_motion_ok:
+                self.set_state('READ_TARGET_2')
 
 
     async def transition_from_READ_TARGET_2(self):
-        if (time.time()-self.timer1) > NO_TARGET_TIMEOUT_SHORT:
+        if (time.time()-self.timer1) > NO_TARGET_TIMEOUT_SHORT or \
+                self.is_there_detection:
             self.stop_detections()
             if self.is_there_detection:
                 self.set_state('READ_TARGET_N')
@@ -758,16 +837,47 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     async def transition_from_ROTATE_TO_TARGET(self):
         if not self.motion_running():
-            self.motion.check_last_motion_exception()
-            self.set_state('READ_TARGET_N')
-    
+            is_motion_ok = False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.set_state('ROTATE_UNTIL_PREDICTIONS')
+            if is_motion_ok:
+                self.set_state('READ_TARGET_N')
+
+
+    async def transition_from_ROTATE_UNTIL_PREDICTIONS(self):
+        if not self.motion_running():
+            is_motion_ok = False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                
+            if is_motion_ok and self.is_there_detection:
+                self.set_state('READ_TARGET')
+            else:
+                await self.enter_ROTATE_UNTIL_DETECTIONS()
+                
 
     async def transition_from_STEP_N(self):
         if self.step_task.done():
-            await self.step_task
-            if self.task_exception is not None:
-                raise self.task_exception
-            self.set_state('READ_TARGET_N')
+            try:
+                await self.step_task
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.is_final_step = False
+
+            self.set_state('READ_TARGET_N_2')
 
 
     async def transition_from_READ_TARGET_N(self):
@@ -778,18 +888,92 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.set_state('STEP_N')
                 
 
+    async def transition_from_READ_TARGET_N_2(self):
+        if (time.time()-self.timer1) > NO_TARGET_TIMEOUT_SHORT or \
+                self.is_there_detection:
+            self.stop_detections()
+            if self.is_there_detection:
+                self.set_state('READ_TARGET_N')
+            else:
+                self.set_state('ROTATE_TO_TARGET_N')
+
+
+    async def transition_from_ROTATE_TO_TARGET_N(self):
+        if not self.motion_running():
+            is_motion_ok = False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.set_state('ROTATE_UNTIL_PREDICTIONS_N')
+            if is_motion_ok:
+                self.set_state('READ_TARGET_N')
+
+
+    async def transition_from_ROTATE_UNTIL_PREDICTIONS_N(self):
+        if not self.motion_running():
+            is_motion_ok = False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                
+            if is_motion_ok and self.is_there_detection:
+                self.set_state('READ_TARGET_N')
+            else:
+                await self.enter_ROTATE_UNTIL_PREDICTIONS_N()
+
+
     async def transition_from_CENTER_TO_TARGET(self):
         if not self.motion_running():
-            self.motion.check_last_motion_exception()
-            self.set_state('READ_TARGET_FINAL')
+            is_motion_ok = False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.set_state('READ_TARGET_N')
+            if is_motion_ok:
+                self.set_state('READ_TARGET_FINAL_CORRECTION')
+
+
+    async def transition_from_READ_TARGET_FINAL_CORRECTION(self):
+        if self.is_there_detection:
+            self.set_state('MOVE_LINEAR_FINAL')
+
+
+    async def transition_from_MOVE_LINEAR_FINAL(self):
+        if not self.motion_running():
+            is_motion_ok= False
+            try:
+                self.motion.check_last_motion_exception()
+                is_motion_ok = True
+            except RayaMotionObstacleDetected as e:
+                self.tries+=1 
+                if self.tries >= self.execute_args['allowed_motion_tries']:
+                    raise e
+                self.set_state('READ_TARGET_FINAL_CORRECTION')
+            if is_motion_ok:
+                self.set_state('READ_TARGET_FINAL')
 
 
     async def transition_from_READ_TARGET_FINAL(self):
         if self.is_there_detection or self.previous_goal: 
             self.set_state('MOVE_LINEAR_FINAL')
 
-
-    async def transition_from_MOVE_LINEAR_FINAL(self):
-        if not self.motion_running():
-            self.motion.check_last_motion_exception()
+        if self.is_there_detection or self.previous_goal:
+            await self.planning_calculations()
+            self.main_result = {
+                    "final_error_x": self.projected_error_x,
+                    "final_error_y": self.projected_error_y,
+                    "final_error_angle": self.angle_robot_goal,
+                }
             self.set_state('END')
