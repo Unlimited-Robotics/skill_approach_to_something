@@ -65,6 +65,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     STATES = [
             'READ_TARGET',
+            'READ_TARGET_1',
             'GO_TO_INTERSECTION',
             'READ_TARGET_2',
             'ROTATE_TO_TARGET',
@@ -89,6 +90,8 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     STATES_TIMEOUTS = {
             'READ_TARGET' :      
+                    (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
+            'READ_TARGET_1' :      
                     (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
             'READ_TARGET_N' :   
                     (NO_TARGET_TIMEOUT_LONG, ERROR_NO_TARGET_FOUND),
@@ -665,6 +668,10 @@ class SkillApproachToSomething(RayaFSMSkill):
             self.step_task = asyncio.create_task(self.record_state_info())
 
 
+    async def enter_READ_TARGET_1(self):
+        self.start_detections()
+        
+
     async def enter_GO_TO_INTERSECTION(self):
         await self.planning_calculations()
         self.linear_distance = self.distance
@@ -813,6 +820,15 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.set_state('GO_TO_INTERSECTION')
 
 
+    async def transition_from_READ_TARGET_1(self):
+        if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
+                and self.previous_goal:
+            self.is_there_detection = True
+            self.correct_detection = self.previous_goal
+        if self.is_there_detection:
+            self.set_state('GO_TO_INTERSECTION')
+
+
     async def transition_from_GO_TO_INTERSECTION(self):
         if self.step_task.done():
             is_motion_ok = False
@@ -879,7 +895,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.is_there_detection = True
                 self.correct_detection = self.previous_goal
             if is_motion_ok and self.is_there_detection:
-                self.set_state('READ_TARGET')
+                self.set_state('READ_TARGET_1')
             else:
                 await self.enter_ROTATE_UNTIL_PREDICTIONS()
                 
