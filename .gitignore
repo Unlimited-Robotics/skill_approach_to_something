@@ -1,0 +1,7 @@
+approach_to_something.egg-info/*
+dist/*
+skills/approach_to_something.egg-info/dependency_links.txt
+skills/approach_to_something.egg-info/PKG-INFO
+skills/approach_to_something.egg-info/SOURCES.txt
+skills/approach_to_something.egg-info/top_level.txt
+build/*
