@@ -647,7 +647,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         await self.navigation.navigate_to_position(  
             x=float(self.navigation_point[0]), 
             y=float(self.navigation_point[1]), 
-            angle=-self.target_angle, pos_unit = POSITION_UNIT.METERS, 
+            angle=self.execute_args['angle_to_goal'], pos_unit = POSITION_UNIT.METERS, 
             ang_unit = ANGLE_UNIT.DEGREES,
             callback_feedback_async = self.cb_nav_feedback,
             callback_finish = self.cb_nav_finish,
