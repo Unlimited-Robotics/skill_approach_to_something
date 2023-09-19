@@ -179,6 +179,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 call_without_detections=True
             )
 
+
     def validate_arguments(self):
         # TODO: Validar que el predictor exista
         self.setup_variables()
@@ -237,6 +238,8 @@ class SkillApproachToSomething(RayaFSMSkill):
             
     
     async def check_initial_position(self):
+        '''Validate if the starting position is very close, 
+            very far, or the desired position.'''
         x_final = False
         y_final = False
         robot_position = await self.navigation.get_position(
@@ -281,6 +284,8 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def planning_calculations(self):
+        '''All calculations related to intersection, 
+        point projection, and angle and distance calculations are here'''
         if not self.correct_detection:
             self.correct_detection = self.previous_goal
         self.p_prediction = [
@@ -316,6 +321,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def record_state_info(self):
+        '''In this function, skill data is recorded for future analysis.'''
         while True:
             if self.tick:
                 self.tick=False
@@ -412,6 +418,7 @@ class SkillApproachToSomething(RayaFSMSkill):
     
     
     def _callback_predictions(self, predictions, timestamp):
+        '''Callback used to obtain predictions'''
         try:
             if predictions and self.waiting_detection:
                 self.__predictions_queue.put(predictions)
@@ -692,6 +699,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_READ_TARGET(self):
+        '''Action used to validate initial conditions and check for predictions.'''
         self.validate_arguments()
         self.start_detections()
         await self.validate_initial_condition()
@@ -700,15 +708,20 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_NAVIGATE(self):
+        '''Action used to navigate to a closer point'''
         await self.planning_calculations()
         await self.nav()
 
 
     async def enter_READ_TARGET_1(self):
+        '''Action used to initiate detections'''
         self.start_detections()
         
 
     async def enter_GO_TO_INTERSECTION(self):
+        '''In this action, the robot is expected to go to the 
+        calculated intersection with the specified entry angle 
+        and requested distance'''
         await self.planning_calculations()
         self.linear_distance = self.distance
         if abs(self.distance_to_inter) > MAX_MISALIGNMENT:
@@ -722,11 +735,13 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_READ_TARGET_2(self):
+        '''Action used to initiate detections'''
         self.start_detections(wait_complete_queue=False)
         self.timer1 = time.time()
         
 
     async def enter_ROTATE_TO_TARGET(self):
+        '''This action allows the robot to center on the target point'''
         robot_position = await self.navigation.get_position(
                 pos_unit=POSITION_UNIT.METERS, 
                 ang_unit=ANGLE_UNIT.DEGREES
@@ -748,6 +763,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_ROTATE_UNTIL_PREDICTIONS(self):
+        '''This action rotates the robot until it sees the target'''
         self.start_detections(wait_complete_queue=False)
         ang_vel=(self.execute_args['angular_velocity'] *
                  np.sign(self.angle_robot_intersection))
@@ -759,15 +775,18 @@ class SkillApproachToSomething(RayaFSMSkill):
         
     
     async def enter_READ_TARGET_N(self):
+        '''Action used to initiate detections'''
         self.start_detections()
         
 
     async def enter_READ_TARGET_N_2(self):
+        '''Action used to initiate detections'''
         self.start_detections(wait_complete_queue=False)
         self.timer1 = time.time()
 
 
     async def enter_ROTATE_TO_TARGET_N(self):
+        '''This action allows the robot to center on the target point'''
         await self.send_feedback({'rotation':self.angle_robot_intersection})
         await self.motion.rotate(
                 angle=self.angle_robot_intersection, 
@@ -777,6 +796,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         
 
     async def enter_ROTATE_UNTIL_PREDICTIONS_N(self):
+        '''This action rotates the robot until it sees the target'''
         self.start_detections(wait_complete_queue=False)
         ang_vel=(self.execute_args['angular_velocity'] *
                  np.sign(self.angle_robot_intersection))
@@ -788,6 +808,8 @@ class SkillApproachToSomething(RayaFSMSkill):
         
 
     async def enter_STEP_N(self):
+        '''This action performs small linear and rotational 
+        movements to reach the target point'''
         self.additional_distance = 0.0
         await self.planning_calculations()
         self.linear_distance = self.execute_args['step_size']
@@ -801,6 +823,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_CENTER_TO_TARGET(self):
+        '''This action allows the robot to center on the target point'''
         await self.planning_calculations()
         await self.send_feedback({
                 'final_rotation': self.angle_robot_goal,
@@ -814,15 +837,19 @@ class SkillApproachToSomething(RayaFSMSkill):
                 )
     
     async def enter_READ_TARGET_FINAL_CORRECTION(self):
+        '''Action used to initiate detections'''
         self.start_detections()
         self.timer1 = time.time()
 
 
     async def enter_READ_TARGET_FINAL(self):
+        '''Action used to initiate detections'''
         self.start_detections()
 
 
     async def enter_MOVE_LINEAR_FINAL(self):
+        '''This action performs the final linear 
+        movement to align itself with minimal error.'''
         await self.planning_calculations()
         linear_distance = self.projected_error_x
         await self.send_feedback({
@@ -837,6 +864,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
 
     async def enter_READ_TARGET_FINAL(self):
+        '''Action used to initiate detections'''
         self.start_detections()
         self.timer1 = time.time()
 
