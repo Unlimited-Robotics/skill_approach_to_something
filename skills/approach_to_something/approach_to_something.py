@@ -65,6 +65,7 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     STATES = [
             'READ_TARGET',
+            'NAVIGATE',
             'READ_TARGET_1',
             'GO_TO_INTERSECTION',
             'READ_TARGET_2',
@@ -110,7 +111,11 @@ class SkillApproachToSomething(RayaFSMSkill):
 
         self.motion:MotionController = await self.get_controller('motion')
         self.navigation:NavigationController = await self.get_controller('navigation')
-
+        await self.navigation.set_map(
+                        map_name='unity_showroom',
+                        wait_localization=True,
+                        wait=True,
+                    )
         self.cv:CVController = await self.get_controller('cv')
 
         # TODO: Definir los params dependiendo del modelo
@@ -153,6 +158,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         self.waiting_detection = True
         self.wait_until_complete_queue = True
         self.is_final_step = False
+        self._is_so_far = False
 
         #calculations
         self.detections_cameras = set()
@@ -271,28 +277,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                     f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})'
                 )
         if ini_target_distance > self.execute_args['max_allowed_distance']:
-            await self.navigation.navigate_to_position(  
-                x=float(self.navigation_point[0]), 
-                y=float(self.navigation_point[1]), 
-                angle=-self.target_angle, pos_unit = POSITION_UNIT.METERS, 
-                ang_unit = ANGLE_UNIT.DEGREES,
-                callback_feedback = self.cb_nav_feedback,
-                callback_finish = self.cb_nav_finish,
-                wait=True,
-            )
-            
-
-    def cb_nav_finish(self, error, error_msg):
-        self.log.info(f'Navigation final state: {error} {error_msg}')
-        if error != 0 and error != 18:
-            self.abort(
-                    ERROR_NAVIGATION,
-                    error_msg
-                )
-
-
-    def cb_nav_feedback(self,  error, error_msg, distance_to_goal, speed):
-        self.log.info(f'Navigation feedback {distance_to_goal} {speed}')
+            self._is_so_far = True
 
 
     async def planning_calculations(self):
@@ -654,6 +639,36 @@ class SkillApproachToSomething(RayaFSMSkill):
         return angulo_grados
     
 
+    async def nav(self):
+        await self.send_feedback({
+                'POINT_TO_NAVIGATE': self.navigation_point,
+                'ANGLE_TO_NAVIGATE' : -self.target_angle
+            })
+        await self.navigation.navigate_to_position(  
+            x=float(self.navigation_point[0]), 
+            y=float(self.navigation_point[1]), 
+            angle=-self.target_angle, pos_unit = POSITION_UNIT.METERS, 
+            ang_unit = ANGLE_UNIT.DEGREES,
+            callback_feedback_async = self.cb_nav_feedback,
+            callback_finish = self.cb_nav_finish,
+            wait=False,
+        )
+
+
+    def cb_nav_finish(self, error, error_msg):
+        self.log.info(f'Navigation final state: {error} {error_msg}')
+        if error != 0 and error != 18:
+            self.abort(
+                    ERROR_NAVIGATION,
+                    error_msg
+                )
+
+    async def cb_nav_feedback(self,  error, error_msg, distance_to_goal, speed):
+        await self.send_feedback({
+                'distance_to_goal': distance_to_goal,
+                'speed' : speed
+            })
+        
     # TOOLS
 
 
@@ -682,6 +697,11 @@ class SkillApproachToSomething(RayaFSMSkill):
         await self.validate_initial_condition()
         if self.execute_args['save_trajectory']:
             self.step_task = asyncio.create_task(self.record_state_info())
+
+
+    async def enter_NAVIGATE(self):
+        await self.planning_calculations()
+        await self.nav()
 
 
     async def enter_READ_TARGET_1(self):
@@ -830,11 +850,19 @@ class SkillApproachToSomething(RayaFSMSkill):
             self.is_there_detection = True
             self.correct_detection = self.previous_goal
         if self.is_there_detection:
-            await self.planning_calculations()
-            if await self.check_initial_position():
+            # await self.planning_calculations()
+            initial_position_ok = await self.check_initial_position()
+            if self._is_so_far:
+                self.set_state('NAVIGATE')
+            elif initial_position_ok:
                 self.set_state('CENTER_TO_TARGET')
             else:
                 self.set_state('GO_TO_INTERSECTION')
+
+
+    async def transition_from_NAVIGATE(self):
+        if not self.navigation.is_navigating():
+            self.set_state('CENTER_TO_TARGET')
 
 
     async def transition_from_READ_TARGET_1(self):
