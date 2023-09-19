@@ -112,7 +112,7 @@ class RayaApplication(RayaApplicationBase):
             '--max-distance',
             type= float,
             help='maximum distance allowed to start approaching',
-            default=3.0)
+            default=2.0)
         
         try:
             self.identifier = literal_eval(self.identifier)

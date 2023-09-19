@@ -56,7 +56,7 @@ class SkillApproachToSomething(RayaFSMSkill):
             'predictions_timeout': 0,
             'tracking_threshold': 0.3,
             'position_state_threshold': 0.5,
-            'max_allowed_distance':3.0,
+            'max_allowed_distance':2.0,
             'allowed_motion_tries': 10 ,
             'allow_previous_predictions': True
         }
@@ -271,14 +271,29 @@ class SkillApproachToSomething(RayaFSMSkill):
                     f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})'
                 )
         if ini_target_distance > self.execute_args['max_allowed_distance']:
-            self.abort(
-                    ERROR_TOO_FAR_TO_TARGET,
-                    f'Robot is too far to the target. It is '
-                    f'{ini_target_distance:.2f}, and it must be less than '
-                    f'max_allowed_distance '
-                    f'{self.execute_args["max_allowed_distance"]}'
-                )
+            await self.navigation.navigate_to_position(  
+                x=float(self.navigation_point[0]), 
+                y=float(self.navigation_point[1]), 
+                angle=-self.target_angle, pos_unit = POSITION_UNIT.METERS, 
+                ang_unit = ANGLE_UNIT.DEGREES,
+                callback_feedback = self.cb_nav_feedback,
+                callback_finish = self.cb_nav_finish,
+                wait=True,
+            )
             
+
+    def cb_nav_finish(self, error, error_msg):
+        self.log.info(f'Navigation final state: {error} {error_msg}')
+        if error != 0 and error != 18:
+            self.abort(
+                    ERROR_NAVIGATION,
+                    error_msg
+                )
+
+
+    def cb_nav_feedback(self,  error, error_msg, distance_to_goal, speed):
+        self.log.info(f'Navigation feedback {distance_to_goal} {speed}')
+
 
     async def planning_calculations(self):
         if not self.correct_detection:
@@ -386,6 +401,7 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.target_angle, 
                 self.execute_args['distance_to_goal']+0.5
             )
+        self.navigation_point = line[2]
         goal_point = self.get_proyected_point(
                 p_prediction[0], 
                 p_prediction[1], 
@@ -814,6 +830,7 @@ class SkillApproachToSomething(RayaFSMSkill):
             self.is_there_detection = True
             self.correct_detection = self.previous_goal
         if self.is_there_detection:
+            await self.planning_calculations()
             if await self.check_initial_position():
                 self.set_state('CENTER_TO_TARGET')
             else:
