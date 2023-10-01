@@ -23,6 +23,17 @@ from raya.skills import RayaFSMSkill
 from .constants import *
 
 
+class ApproachException(RayaException):
+    
+    def __init__(self, error_code, error_msg, current_error):
+        super().__init__(error_msg)
+        self.error_code = error_code
+        self.error_msg = error_msg
+        self.current_error = current_error
+
+    def __str__(self):
+        return f'[{self.error_code}] {self.error_msg}. Current error: {self.current_error}'
+
 
 class SkillApproachToSomething(RayaFSMSkill):
 
@@ -185,6 +196,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         self.setup_variables()
         if self.execute_args['angle_to_goal'] > 180.0 or \
                 self.execute_args['angle_to_goal'] < -180.0:
+
             self.abort(*ERROR_INVALID_ANGLE)
         if not self.handler_name in HANDLER_NAMES:
             self.abort(*ERROR_INVALID_PREDICTOR)
@@ -224,17 +236,27 @@ class SkillApproachToSomething(RayaFSMSkill):
 
     async def validate_initial_condition(self):
         if not await self.navigation.is_localized():
-            self.abort(*ERROR_NOT_LOCALIZED)
+            raise ApproachException(
+                    *ERROR_NOT_LOCALIZED, 
+                    None
+                )
+            # self.abort(*ERROR_NOT_LOCALIZED)
         _, _, current_robot_angle = await self.navigation.get_position()
         angle_error = abs(self.angle_difference(
                 current_robot_angle, self.execute_args['angle_to_goal']
             ))
         if angle_error > MAX_INITIAL_ANGLE_ERROR:
-            self.abort(
-                    ERROR_INITIAL_ANGLE_TOO_FAR,
+            raise ApproachException(
+                    ERROR_INITIAL_ANGLE_TOO_FAR, 
                     f'The initial angle ({current_robot_angle:.2f}) is too far'
-                    f' from the target angle ({self.execute_args["angle_to_goal"]:.2f})'
+                    f' from the target angle ({self.execute_args["angle_to_goal"]:.2f})',
+                    None
                 )
+            # self.abort(
+            #         ERROR_INITIAL_ANGLE_TOO_FAR,
+            #         f'The initial angle ({current_robot_angle:.2f}) is too far'
+            #         f' from the target angle ({self.execute_args["angle_to_goal"]:.2f})'
+            #     )
             
     
     async def check_initial_position(self):
@@ -272,13 +294,21 @@ class SkillApproachToSomething(RayaFSMSkill):
             })
         if ini_target_distance < (self.execute_args['distance_to_goal'] + 
                                   self.additional_distance):
-            self.abort(
-                    ERROR_TOO_CLOSE_TO_TARGET,
+            raise ApproachException(
+                    ERROR_TOO_CLOSE_TO_TARGET, 
                     f'Robot is too close to the target. It is '
                     f'{ini_target_distance:.2f}, and it must be at least the '
                     f'distance to goal ({self.execute_args["distance_to_goal"]:.2f}) '
-                    f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})'
+                    f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})',
+                    (distance_x, distance_y)
                 )
+            # self.abort(
+            #         ERROR_TOO_CLOSE_TO_TARGET,
+            #         f'Robot is too close to the target. It is '
+            #         f'{ini_target_distance:.2f}, and it must be at least the '
+            #         f'distance to goal ({self.execute_args["distance_to_goal"]:.2f}) '
+            #         f'+ MIN_CORRECTION_DISTANCE ({MIN_CORRECTION_DISTANCE})'
+            #     )
         if ini_target_distance > self.execute_args['max_allowed_distance']:
             self._is_so_far = True
 
@@ -427,9 +457,12 @@ class SkillApproachToSomething(RayaFSMSkill):
                         not self.wait_until_complete_queue:                
                     self.__update_predictions()
         except Exception as e:
-            self.abort(254, f'Exception in callback: [{type(e)}]: {e}')
             import traceback
             traceback.print_exc()
+            raise ApproachException(
+                    254, f'Exception in callback preductions {e}', None)
+                
+            # self.abort(254, f'Exception in callback: [{type(e)}]: {e}')
                 
 
     def __update_predictions(self):
@@ -665,10 +698,11 @@ class SkillApproachToSomething(RayaFSMSkill):
     def cb_nav_finish(self, error, error_msg):
         self.log.info(f'Navigation final state: {error} {error_msg}')
         if error != 0 and error != 18:
-            self.abort(
-                    ERROR_NAVIGATION,
-                    error_msg
-                )
+            raise ApproachException(ERROR_NAVIGATION, error_msg, None)
+            # self.abort(
+            #         ERROR_NAVIGATION,
+            #         error_msg
+            #     )
 
     async def cb_nav_feedback(self,  error, error_msg, distance_to_goal, speed):
         await self.send_feedback({
@@ -725,12 +759,10 @@ class SkillApproachToSomething(RayaFSMSkill):
         await self.planning_calculations()
         self.linear_distance = self.distance
         if abs(self.distance_to_inter) > MAX_MISALIGNMENT:
-            self.abort(
-                    ERROR_TOO_DISALIGNED,
-                    'The robot is disaligned by '
+            raise ApproachException(ERROR_TOO_DISALIGNED, 'The robot is disaligned by '
                     f'{abs(self.distance_to_inter)} meters, max '
-                    f'{MAX_MISALIGNMENT} is allowed.'
-                )
+                    f'{MAX_MISALIGNMENT} is allowed.', 
+                    (self.projected_error_x, self.projected_error_y))
         self.step_task = asyncio.create_task(self.rotate_and_move_linear())
 
 
@@ -912,7 +944,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.set_state('ROTATE_UNTIL_PREDICTIONS')
 
             if is_motion_ok:
@@ -946,7 +980,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.set_state('ROTATE_UNTIL_PREDICTIONS')
             if is_motion_ok:
                 self.set_state('READ_TARGET_N')
@@ -962,7 +998,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
             if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
                     and self.previous_goal:   
                 self.is_there_detection = True
@@ -981,7 +1019,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.is_final_step = False
 
             self.set_state('READ_TARGET_N_2')
@@ -1026,7 +1066,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.set_state('ROTATE_UNTIL_PREDICTIONS_N')
             if is_motion_ok:
                 self.set_state('READ_TARGET_N')
@@ -1042,7 +1084,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
             if not self.is_there_detection and self.execute_args['allow_previous_predictions'] \
                     and self.previous_goal:
                 self.is_there_detection = True
@@ -1063,7 +1107,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.set_state('READ_TARGET_N')
             if is_motion_ok:
                 self.set_state('READ_TARGET_FINAL_CORRECTION')
@@ -1088,7 +1134,9 @@ class SkillApproachToSomething(RayaFSMSkill):
                 self.tries = self.tries + 1 
                 await self.send_feedback(f"Motion Failed by obstacle, try: {self.tries}")
                 if self.tries >= self.execute_args['allowed_motion_tries']:
-                    raise e
+                    raise ApproachException(ERROR_MOVING, 
+                                            'Motion Failed by obstacle',
+                                            (self.projected_error_x, self.projected_error_y) )
                 self.set_state('READ_TARGET_FINAL_CORRECTION')
             if is_motion_ok:
                 self.set_state('READ_TARGET_FINAL')
