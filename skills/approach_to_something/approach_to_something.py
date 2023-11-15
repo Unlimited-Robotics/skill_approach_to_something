@@ -69,7 +69,8 @@ class SkillApproachToSomething(RayaFSMSkill):
             'position_state_threshold': 0.5,
             'max_allowed_distance':2.0,
             'allowed_motion_tries': 10 ,
-            'allow_previous_predictions': True
+            'allow_previous_predictions': True,
+            'y_offset': 0.0
         }
 
     ### FSM ###
@@ -482,6 +483,12 @@ class SkillApproachToSomething(RayaFSMSkill):
             correct_detection = self.__process_multiple_detections(predicts)
             if correct_detection:
                 self.previous_goal = correct_detection
+                if self.execute_args['y_offset']:
+                    angle_rad = math.radians(self.target_angle)
+                    offset_x = self.execute_args['y_offset'] * math.sin(angle_rad)
+                    offset_y = self.execute_args['y_offset'] * math.cos(angle_rad)
+                    correct_detection[0] = correct_detection[0] + offset_x
+                    correct_detection[1] = correct_detection[1] - offset_y
                 self.correct_detection = correct_detection
                 self.is_there_detection = True
                 self.waiting_detection = False
@@ -601,7 +608,7 @@ class SkillApproachToSomething(RayaFSMSkill):
         delta_y = y_b - y_a
         angulo_rad = math.radians(angulo_direccion)
         x_rel = delta_x * math.cos(angulo_rad) + delta_y * math.sin(angulo_rad)
-        y_rel = delta_y * math.cos(angulo_rad) - delta_x * math.sin(angulo_rad)
+        y_rel = delta_y * math.cos(angulo_rad) - delta_x * math.sin(angulo_rad) 
         return x_rel, y_rel
     
 

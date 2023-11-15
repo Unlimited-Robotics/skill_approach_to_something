@@ -34,6 +34,7 @@ class RayaApplication(RayaApplicationBase):
                         'max_angle_error_allowed': self.max_a_err,
                         'max_allowed_distance': self.max_distance,
                         'save_trajectory': self.save_trajectory,
+                        'y_offset': self.y_offset
                     },
                 callback_feedback=self.cb_feedback
             )
@@ -113,7 +114,11 @@ class RayaApplication(RayaApplicationBase):
             type= float,
             help='maximum distance allowed to start approaching',
             default=2.0)
-        
+        self.y_offset = self.get_argument(
+            '--y-offset',
+            type= float,
+            help='Offset in y axis',
+            default=0.0)        
         try:
             self.identifier = literal_eval(self.identifier)
         except:
