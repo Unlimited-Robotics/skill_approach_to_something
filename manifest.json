@@ -2,7 +2,7 @@
     "name": "approach_to_something",
     "description": "",
     "type": "skill",
-    "version" : "0.6.1.dev0",
+    "version" : "0.6.2.dev",
     "dependencies" : {
         "pip": [],
         "skills": []
